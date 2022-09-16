@@ -140,7 +140,7 @@ NOTES:
  *   Rating: 1
  */
 int bitXor(int x, int y) {
-  return 2;
+  return (~((~x) & (~y))) & (~(x & y));
 }
 /* 
  * tmin - return minimum two's complement integer 
@@ -149,7 +149,7 @@ int bitXor(int x, int y) {
  *   Rating: 1
  */
 int tmin(void) {
-  return 2;
+  return 0x80000000;
 }
 //2
 /*
@@ -160,7 +160,7 @@ int tmin(void) {
  *   Rating: 2
  */
 int isTmax(int x) {
-  return 2;
+  return !(x ^ 0x7FFFFFFF);
 }
 /* 
  * allOddBits - return 1 if all odd-numbered bits in word set to 1
@@ -170,7 +170,7 @@ int isTmax(int x) {
  *   Rating: 2
  */
 int allOddBits(int x) {
-  return 2;
+  return !((x & 0xAAAAAAAA) ^ 0xAAAAAAAA);
 }
 /* 
  * negate - return -x 
@@ -180,7 +180,7 @@ int allOddBits(int x) {
  *   Rating: 2
  */
 int negate(int x) {
-  return 2;
+  return ~x + 1;
 }
 //3
 /* 
@@ -193,7 +193,9 @@ int negate(int x) {
  *   Rating: 3
  */
 int isAsciiDigit(int x) {
-  return 2;
+  int a = x + ~0x39 + 1;
+  int b = x + ~0x30 + 1;
+  return isLessOrEqual(a, 0) & isLessOrEqual(0, b);
 }
 /* 
  * conditional - same as x ? y : z 
@@ -203,7 +205,8 @@ int isAsciiDigit(int x) {
  *   Rating: 3
  */
 int conditional(int x, int y, int z) {
-  return 2;
+  x = (0xFFFFFFFF + !x);
+  return (x & y) | (~x & z);
 }
 /* 
  * isLessOrEqual - if x <= y  then return 1, else return 0 
@@ -213,7 +216,16 @@ int conditional(int x, int y, int z) {
  *   Rating: 3
  */
 int isLessOrEqual(int x, int y) {
-  return 2;
+  // 求差的符号位，正数为0，否则为1
+  int sign = ((y + (~x + 1)) & 0x80000000) >> 31;
+  // 原数的符号
+  int sign_x = x & 0x80000000;
+  int sign_y = y & 0x80000000;
+  // 两者符号位相同为0，不同则为1
+  int flag = ((sign_x ^ sign_y) >> 31) & 1;
+  // 如果符号位相同，那么 judgeVal 要求为正
+  // 如果符号位不同，那么 X 的符号位需要为1(负)
+  return (!flag & !sign) | (flag & (sign_x >> 31));
 }
 //4
 /* 
@@ -225,7 +237,10 @@ int isLessOrEqual(int x, int y) {
  *   Rating: 4 
  */
 int logicalNeg(int x) {
-  return 2;
+  // 计算 x | -x 的符号位
+  // 0 和 -0 的符号位都为0, 因此 0 + 1 = 1
+  // 非0数与其相反数的或运算,符号位一定为1,因此右移31位,全部为1
+  return ((x | (~x + 1)) >> 31) + 1;
 }
 /* howManyBits - return the minimum number of bits required to represent x in
  *             two's complement
@@ -240,7 +255,25 @@ int logicalNeg(int x) {
  *  Rating: 4
  */
 int howManyBits(int x) {
-  return 0;
+  // 符号位
+  int sign = x >> 31;
+  // 这里如果 x 是正数就保持不变，如果是负数就对其进行按位取反
+  // 因为这样可以同时取掉负数的首位1，从而去找首位的 0(反转成了首位1)
+  x = (sign & ~x) | (~sign & x);
+  // 最高的 16 位是否有1
+  int b16 = !!(x >> 16) << 4;
+  // 如果有就将远数字右移 16 位
+  x = x >> b16;
+  int b8 = !!(x >> 8) << 3;
+  x = x >> b8;
+  int b4 = !!(x >> 4) << 2;
+  x = x >> b4;
+  int b2 = !!(x >> 2) << 1;
+  x = x >> b2;
+  int b1 = !!(x >> 1);
+  x = x >> b1;
+  int b0 = x;
+  return b16 + b8 + b4 + b2 + b1 + b0 + 1;
 }
 //float
 /* 
@@ -255,7 +288,19 @@ int howManyBits(int x) {
  *   Rating: 4
  */
 unsigned float_twice(unsigned uf) {
-  return 2;
+  unsigned exp = uf & 0x7f800000; // 求出阶码位
+  unsigned sign = uf & 0x80000000; // 符号位
+  unsigned frac = uf & 0x007fffff; // 小数位置
+
+  // 无穷小和0的情况
+  if (exp == 0) return sign | uf << 1;
+  // 无穷大和 NAN 的情况
+  if (exp == 0x7f800000) return uf;
+  // 阶码 + 1 如果无穷大的话，就直接返回原符号无穷大
+  exp += 0x00800000;
+  if (exp == 0x7f800000) frac = 0;
+  // 如果不是无穷大就返回 +1 后的原符号数
+  return sign | exp | frac;
 }
 /* 
  * float_i2f - Return bit-level equivalent of expression (float) x
@@ -267,7 +312,26 @@ unsigned float_twice(unsigned uf) {
  *   Rating: 4
  */
 unsigned float_i2f(int x) {
-  return 2;
+  if(x == 0) return 0;
+  // 符号位
+  int sign = (x >> 31) & 0x01;
+  if(sign == 1) x = ~x + 1;
+  // 阶码
+  int exp = 1;
+  unsigned tmp = x;
+  while(!(tmp & 0x80000000)){
+    tmp <<= 1;
+    exp++;
+  }
+  tmp <<= 1;
+  exp = 127 + 32 - exp;
+  // 小数
+  int flag = 0;
+	if((tmp & 0x1ff)>0x100)
+		flag = 1;
+	if((tmp & 0x3ff)==0x300)
+		flag = 1;
+  return (sign<<31) + (exp << 23) + (tmp >> 9) + flag;
 }
 /* 
  * float_f2i - Return bit-level equivalent of expression (int) f
@@ -282,5 +346,16 @@ unsigned float_i2f(int x) {
  *   Rating: 4
  */
 int float_f2i(unsigned uf) {
-  return 2;
+  // 符号位
+  int sign = uf >> 31;
+  // 阶码位
+  int exp = ((uf >> 23) & 0xff) - 127;
+  // 小数位
+  int frac = (uf & 0x007fffff) | 0x00800000;
+  int value = 0;
+  if (exp < 0) return 0;
+  if (exp > 31) return 0x80000000;
+  if (exp < 23) value = frac >> (23 - exp);
+  else if (exp > 23) value = frac << (exp - 23);
+  return sign ? ~value + 1 : value; 
 }
